@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<title>Лабораторна робота 1: паралельний пошук підрядка на PARCS</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.45; color: #222; max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 20pt; margin: 0 0 4px; }
+  h2 { font-size: 14pt; border-bottom: 1px solid #ccc; padding-bottom: 3px; margin-top: 26px; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 16px 0 6px; page-break-after: avoid; }
+  .meta { color: #555; margin-bottom: 14px; }
+  .box { background: #f4f6f8; border-left: 4px solid #1f77b4; padding: 8px 12px; margin: 10px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 10.5pt; page-break-inside: avoid; }
+  th, td { border: 1px solid #bbb; padding: 5px 7px; text-align: center; }
+  th { background: #e9edf2; }
+  td:first-child, th:first-child { text-align: left; }
+  img { max-width: 100%; border: 1px solid #ddd; margin: 6px 0; page-break-inside: avoid; }
+  figure { margin: 10px 0; page-break-inside: avoid; }
+  figcaption { color: #555; font-size: 9.5pt; margin-top: 3px; }
+  pre, code { font-family: Consolas, "Courier New", monospace; font-size: 9pt; }
+  pre { background: #f6f8fa; border: 1px solid #e1e4e8; padding: 8px; white-space: pre-wrap; word-break: break-word; page-break-inside: avoid; }
+  code { background: #f0f2f4; padding: 0 3px; }
+  a { color: #0b5cad; word-break: break-all; }
+  ol li, ul li { margin-bottom: 4px; }
+  .pb { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<h1>Лабораторна робота 1: паралельний пошук підрядка на ПАРКС</h1>
+<div class="meta">
+  Кучерук Данило, група ТТП-41 · Курс «Хмарні обчислення» · Платформа: PARCS-Python, Google Cloud (Compute Engine)<br>
+  Код: <a href="https://github.com/DanyloKuch/parcs-substring-search">https://github.com/DanyloKuch/parcs-substring-search</a>
+</div>
+
+<h2>1. Ідея реалізації паралельного алгоритму</h2>
+<p>Обрано тему 3.1 з переліку: паралельний пошук підрядка за алгоритмом Кнута–Морріса–Пратта (КМП). Задача: порахувати, скільки разів патерн <code>abcab</code> зустрічається в тексті довжиною <b>L = 20 000 000</b> символів.</p>
+<ul>
+  <li><b>Текст не передається по мережі.</b> Кожен вузол обчислює символ на позиції <code>i</code> детерміновано (хеш від <code>i</code>), тому всі вузли мають однаковий текст. По мережі йдуть лише патерн і межі діапазону.</li>
+  <li><b>Master</b> ділить початкові позиції <code>[0, L − m + 1)</code> на <code>N</code> рівних діапазонів (<code>m = 5</code>) і надсилає кожному воркеру <code>(патерн, from, to)</code>.</li>
+  <li><b>Воркер</b> запускає КМП на символах <code>[from, to + m − 1)</code> і рахує входження, що починаються в <code>[from, to)</code>. Діапазони перетинаються на <code>m − 1</code> символ, тож збіг на межі не губиться й не рахується двічі.</li>
+  <li><b>Master</b> сумує результати воркерів.</li>
+</ul>
+<p>Послідовна версія (еталон) виконує той самий КМП на master-і по всьому тексту. Обидві версії мають давати однакову кількість збігів; у всіх прогонах це <b>19 245</b>.</p>
+
+<h2>2. Архітектура кластера</h2>
+<table>
+  <tr><th>Вузол</th><th>Роль</th><th>Внутрішня IP</th><th>Зона</th><th>Машина</th></tr>
+  <tr><td>master</td><td>PARCS master: веб-інтерфейс :8080, планувальник, клієнт задачі</td><td>10.132.0.10</td><td>europe-west1-b</td><td>n1-standard-1 (1 vCPU)</td></tr>
+  <tr><td>worker-1</td><td>PARCS worker</td><td>10.132.0.11</td><td>europe-west1-b</td><td>n1-standard-1 (1 vCPU)</td></tr>
+  <tr><td>worker-2</td><td>PARCS worker</td><td>10.132.0.12</td><td>europe-west1-b</td><td>n1-standard-1 (1 vCPU)</td></tr>
+  <tr><td>worker-3</td><td>PARCS worker</td><td>10.132.0.13</td><td>europe-west1-b</td><td>n1-standard-1 (1 vCPU)</td></tr>
+  <tr><td>worker-4</td><td>PARCS worker</td><td>10.128.0.4</td><td>us-central1-a</td><td>n1-standard-1 (1 vCPU)</td></tr>
+</table>
+<p>Усі вузли працюють на Container-Optimized OS і запускають контейнер <code>hummer12007/parcs-node</code>. Воркери самі реєструються на master через внутрішню мережу. Задачі подаються через веб-API master-а.</p>
+
+<h2>3. Демонстрація вузлів</h2>
+<figure>
+  <img src="screenshot_workers.png" alt="Сторінка Nodes">
+  <figcaption>Рис. 1. Сторінка Nodes (/workers): master бачить 4 зареєстровані воркери (#0–#3) з увімкненим статусом. Адреси 10.132.0.11–13 і 10.128.0.4 відповідають таблиці вище.</figcaption>
+</figure>
+<figure>
+  <img src="screenshot_jobs.png" alt="Сторінка Jobs">
+  <figcaption>Рис. 2. Сторінка Jobs (/jobs): послідовний еталон (#0) і паралельні запуски з 1, 2, 3 воркерами (#1–#3). Запуск з 4 воркерами (#4) є нижче у списку й у виводі, наведеному в розділі 4.</figcaption>
+</figure>
+
+<h2>4. Результати</h2>
+<h3>4.1. Таблиця результатів (основний прогін)</h3>
+<p>Вхід: <code>L = 20 000 000</code>, патерн <code>abcab</code>. Прискорення <code>S = T₁ / T_N</code>, ефективність <code>E = S / N</code>, де <code>T₁</code> — послідовний еталон.</p>
+<table>
+  <tr><th>Режим</th><th>Воркерів N</th><th>Знайдено збігів</th><th>Час, с</th><th>Прискорення S</th><th>Ефективність E</th></tr>
+  <tr><td>послідовно (master)</td><td>—</td><td>19 245</td><td>21.249</td><td>—</td><td>—</td></tr>
+  <tr><td>PARCS</td><td>1</td><td>19 245</td><td>24.311</td><td>0.87</td><td>87 %</td></tr>
+  <tr><td>PARCS</td><td>2</td><td>19 245</td><td>12.050</td><td>1.76</td><td>88 %</td></tr>
+  <tr><td>PARCS</td><td>3</td><td>19 245</td><td>8.183</td><td>2.60</td><td>87 %</td></tr>
+  <tr><td>PARCS</td><td>4</td><td>19 245</td><td>6.466</td><td>3.29</td><td>82 %</td></tr>
+</table>
+
+<h3>4.2. Повторний прогін (перевірка відтворюваності)</h3>
+<p>Після перезапуску кластера (VM були зупинені між прогонами) ті самі задачі були запущені повторно з тими самими вхідними файлами.</p>
+<table>
+  <tr><th>Режим</th><th>Воркерів N</th><th>Знайдено збігів</th><th>Час, с (прогін 1)</th><th>Час, с (прогін 2)</th><th>Різниця</th></tr>
+  <tr><td>послідовно (master)</td><td>—</td><td>19 245</td><td>21.249</td><td>20.896</td><td>1.7 %</td></tr>
+  <tr><td>PARCS</td><td>1</td><td>19 245</td><td>24.311</td><td>23.756</td><td>2.3 %</td></tr>
+  <tr><td>PARCS</td><td>2</td><td>19 245</td><td>12.050</td><td>12.091</td><td>0.3 %</td></tr>
+  <tr><td>PARCS</td><td>3</td><td>19 245</td><td>8.183</td><td>8.066</td><td>1.4 %</td></tr>
+  <tr><td>PARCS</td><td>4</td><td>19 245</td><td>6.466</td><td>6.534</td><td>1.0 %</td></tr>
+</table>
+<p>Кількість збігів однакова в усіх прогонах, а час відрізняється не більше ніж на 2.3 %.</p>
+
+<h3>4.3. Вивід задач з PARCS (сирий текст з <code>/api/job/&lt;id&gt;/output</code>)</h3>
+<pre>seq   (id 0): mode=seq workers=1 count=19245 time=20.896
+par   (id 1): mode=par workers=1 count=19245 time=23.756
+par   (id 2): mode=par workers=2 count=19245 time=12.091
+par   (id 3): mode=par workers=3 count=19245 time=8.066
+par   (id 4): mode=par workers=4 count=19245 time=6.534</pre>
+
+<h3>4.4. Графік залежності часу від кількості воркерів</h3>
+<figure>
+  <img src="plot.png" alt="Графік часу та прискорення">
+  <figcaption>Рис. 3. Ліворуч: час виконання від N (пунктир — послідовний еталон). Праворуч: фактичне прискорення проти ідеального N, підписано ефективність. Дані основного прогону.</figcaption>
+</figure>
+
+<p><b>Інтерпретація.</b> Час майже обернено пропорційний N: від 24.3 с на одному воркері до 6.5 с на чотирьох. Ефективність стабільна (82–88 %). Втрати пояснюються накладними витратами PARCS: передача задачі та розв'язку, RPC через Pyro4, створення точок і повернення результатів. Для одного воркера накладні витрати перевищують виграш від паралельності, тому 1 воркер трохи повільніший за послідовний еталон на master-і (24.3 с проти 21.2 с).</p>
+
+<h2>5. Гайд налаштування хмарного сервісу</h2>
+<p>Потрібні: <code>gcloud</code> (Google Cloud SDK) і акаунт з увімкненим білінгом.</p>
+<pre># 0. Вхід і проєкт
+gcloud auth login
+gcloud config set project &lt;PROJECT_ID&gt;
+gcloud services enable compute.googleapis.com
+
+# 1. Фаєрвол: веб-інтерфейс і SSH тільки з твого IP (замість 0.0.0.0/0)
+MYIP=$(curl -s https://api.ipify.org)
+gcloud compute firewall-rules create parcs-allow-me --network=default --direction=INGRESS \
+  --allow=tcp:8080,tcp:22 --source-ranges="$MYIP/32"
+
+# 2. Стартовий скрипт: відкриває внутрішню мережу і порт 8080 у iptables хоста COS
+#    та запускає контейнер PARCS з роллю з метаданих (parcs-args)
+cat &gt; startup.sh &lt;&lt;'EOF'
+#!/bin/bash
+iptables -C INPUT -s 10.0.0.0/8 -j ACCEPT 2&gt;/dev/null || iptables -I INPUT -s 10.0.0.0/8 -j ACCEPT
+iptables -C INPUT -p tcp --dport 8080 -j ACCEPT 2&gt;/dev/null || iptables -I INPUT -p tcp --dport 8080 -j ACCEPT
+ARGS=$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/parcs-args)
+docker rm -f parcs &gt;/dev/null 2&gt;&amp;1
+docker run -d --name parcs --restart=always --network=host -e PARCS_ARGS="$ARGS" registry.hub.docker.com/hummer12007/parcs-node
+EOF
+
+# 3. Master
+gcloud compute instances create master --zone=europe-west1-b --machine-type=n1-standard-1 \
+  --image-family=cos-stable --image-project=cos-cloud --tags=parcs \
+  --metadata=parcs-args=master --metadata-from-file=startup-script=startup.sh
+MASTER_IP=$(gcloud compute instances describe master --zone=europe-west1-b --format='value(networkInterfaces[0].networkIP)')
+
+# 4. Воркери (N штук)
+for i in 1 2 3; do
+  gcloud compute instances create worker-$i --zone=europe-west1-b --machine-type=n1-standard-1 \
+    --image-family=cos-stable --image-project=cos-cloud --tags=parcs \
+    --metadata="parcs-args=worker $MASTER_IP" --metadata-from-file=startup-script=startup.sh
+done
+
+# 5. Перевірка реєстрації воркерів (через 1–3 хв)
+curl -s http://&lt;MASTER_EXTERNAL_IP&gt;:8080/api/worker
+
+# 6. Задача: http://&lt;MASTER_EXTERNAL_IP&gt;:8080/add_job  або API:
+curl -F job_name=test -F solution_file=@substring_solution.py -F input_file=@input_par.txt \
+     http://&lt;MASTER_EXTERNAL_IP&gt;:8080/api/job
+curl http://&lt;MASTER_EXTERNAL_IP&gt;:8080/api/job/&lt;ID&gt;/output
+# Кількість воркерів N = кількість увімкнених воркерів:
+curl -X POST http://&lt;MASTER_EXTERNAL_IP&gt;:8080/api/worker/&lt;ID&gt;/enable   # або /disable
+
+# 7. Після роботи — зупинити VM, щоб не платити за простій
+gcloud compute instances stop master worker-1 worker-2 worker-3 --zone=europe-west1-b</pre>
+<p>Розв'язок <code>substring_solution.py</code> і вхідні файли <code>input_par.txt</code> / <code>input_seq.txt</code> лежать у репозиторії, папка <code>solution/</code>.</p>
+
+<h2>6. Build-помилки та як їх виправляв</h2>
+<ol>
+  <li><b>Parcs.NET (C#) не запускається на Linux.</b> Спершу розглядав PARCS-C#. Docker-образи <code>andriikhavro/parcshostserver</code> і <code>parcsdaemon</code> мають Windows-збірки (<code>windowsservercore-1709</code>), а Linux-тег <code>dotnetcore-2.1</code> не відповідає поточному коду (.NET Framework 4.6.1, <code>System.ServiceProcess</code>). Тому перейшов на PARCS-Python.</li>
+  <li><b>Targeting pack .NET Framework 4.6.1 відсутній.</b> <code>winget</code> пропонує лише 4.6.2 і новіші, без пакета MSBuild видає <code>MSB3644</code>. Перенацілив проєкти на v4.8 (встановлена версія). Цей крок був для спроби з C#, у фінальному рішенні не використовувався.</li>
+  <li><b><code>gcloud compute instances create-with-container</code> вимкнено</b> для проєкту (помилка «option ... is discontinued»). Замість нього: Container-Optimized OS і стартовий скрипт з <code>docker run</code>.</li>
+  <li><b>Python 2.7 і кодування.</b> Розв'язок PARCS-Python виконується на Python 2.7. Без декларації <code># -*- coding: utf-8 -*-</code> воркер не може завантажити модуль з кириличними коментарями (<code>Non-ASCII character '\xd0' ... no encoding declared</code>), і задача падає з порожньою причиною.</li>
+  <li><b>Фаєрвол хоста COS.</b> Образ Container-Optimized OS має <code>iptables -P INPUT DROP</code> і відкритий лише порт 22. Без правил для <code>10.0.0.0/8</code> і <code>8080</code> воркери не реєструються (<code>Connection timed out</code>), хоча правила GCP відкриті. Ці правила мають бути в стартовому скрипті, інакше вони зникають після перезапуску VM.</li>
+  <li><b>Квоти.</b> Регіон europe-west1 дозволяє 8 vCPU і 4 зовнішні IP. Тому четвертий воркер створено в us-central1-a. Внутрішня мережа між регіонами в default-VPC працює.</li>
+</ol>
+
+<h2>7. Обмеження</h2>
+<ul>
+  <li>Кожен замір зроблено двічі (два прогони), усереднення на більшій кількості прогонів немає.</li>
+  <li>Вузли <code>n1-standard-1</code> мають 1 vCPU, тож «один воркер = одне ядро» виконується природно.</li>
+  <li>Текст генерується, а не читається з файлу: свідомий вибір, щоб не передавати великі дані по мережі.</li>
+  <li>Послідовний еталон міряється на master-і тим самим розв'язком, тож обидві версії мають однакову реалізацію КМП.</li>
+  <li>Після перезапуску VM задачі в PARCS зникають (job-директорії в <code>/tmp</code> контейнера), тому результати треба знімати одразу після прогонів.</li>
+</ul>
+
+</body>
+</html>
